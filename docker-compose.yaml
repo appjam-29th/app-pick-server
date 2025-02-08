@@ -11,14 +11,15 @@ services:
     ports:
       - "3306:3306"
 
-  spring-boot-app:
-    image: 2024-msg-server:1.1
-    container_name: spring-boot-container
+  spring-boot-server:
+    image: apppick-server:latest
+    container_name: apppick-server
     ports:
-      - "8080:8080"
+      - "8081:8081"  # 호스트의 8081 -> 컨테이너 8081
     depends_on:
       - mysql
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dbname
+      # Spring Boot 내부에서 8081 포트로 구동되도록 설정 (application.properties 참고)
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/apppick
       SPRING_DATASOURCE_USERNAME: username
       SPRING_DATASOURCE_PASSWORD: password
