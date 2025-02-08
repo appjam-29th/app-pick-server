@@ -3,29 +3,14 @@ import os
 import json
 import re
 from utils.fetch_utils import get_latest_app_icon, validate_image_url
+from utils.prompt_templates import get_app_recommendation_prompt
+from utils.fetch_itunes_app_data import fetch_itunes_app_data  # 앱스토어 데이터 조회 함수 추가
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 async def get_app_recommendations_with_ai(user_request):
-    prompt = f"""
-    사용자 정보:
-    - 카테고리: {', '.join(user_request.category)}
-    - 성별: {user_request.gender}
-    - 연령대: {user_request.age_group}
-    - 앱 추구 가치: {', '.join(user_request.values)}
-    - 최애 앱: {user_request.favorite_app}
+    prompt = get_app_recommendation_prompt(user_request)  # 프롬프트 가져오기
 
-    위 정보를 바탕으로 한국 앱스토어의 앱을 5개 추천해주세요. JSON 형식으로 응답하세요.
-    ```json
-    [
-        {{"앱 이름": "앱1", "앱 URL": "앱1의 앱스토어 URL", "앱 아이콘 URL": "앱1의 아이콘 URL", "강점": "앱1의 강점"}},
-        {{"앱 이름": "앱2", "앱 URL": "앱2의 앱스토어 URL", "앱 아이콘 URL": "앱2의 아이콘 URL", "강점": "앱2의 강점"}},
-        {{"앱 이름": "앱3", "앱 URL": "앱3의 앱스토어 URL", "앱 아이콘 URL": "앱3의 아이콘 URL", "강점": "앱3의 강점"}},
-        {{"앱 이름": "앱4", "앱 URL": "앱4의 앱스토어 URL", "앱 아이콘 URL": "앱4의 아이콘 URL", "강점": "앱4의 강점"}},
-        {{"앱 이름": "앱5", "앱 URL": "앱5의 앱스토어 URL", "앱 아이콘 URL": "앱5의 아이콘 URL", "강점": "앱5의 강점"}}
-    ]
-    ```
-    """
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4",
@@ -36,15 +21,28 @@ async def get_app_recommendations_with_ai(user_request):
         )
 
         ai_output = response['choices'][0]['message']['content'].strip()
+        print(ai_output)
 
         json_match = re.search(r"\[\s*\{.*?\}\s*\]", ai_output, re.DOTALL)
         if json_match:
             apps = json.loads(json_match.group())
 
             if isinstance(apps, list) and len(apps) == 5:
+                corrected_apps = []
+
                 for app in apps:
-                    app["앱 아이콘 URL"] = validate_image_url(get_latest_app_icon(app["앱 URL"]))
-                return apps
+                    actual_app_data = fetch_itunes_app_data(app["앱 이름"])  # 실제 앱스토어 데이터 조회
+                    if actual_app_data:
+                        corrected_apps.append({
+                            "앱 이름": actual_app_data["앱 이름"],
+                            "앱 URL": actual_app_data["앱 URL"],
+                            "앱 아이콘 URL": actual_app_data["앱 아이콘 URL"],
+                            "강점": app["강점"]  # AI가 제공한 강점 그대로 유지
+                        })
+                    else:
+                        corrected_apps.append(app)  # 앱스토어에서 찾지 못한 경우 AI 데이터 유지
+
+                return corrected_apps
 
             return {"error": "AI가 5개의 앱을 제공하지 않았습니다."}
         else:
