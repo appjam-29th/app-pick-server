@@ -1,6 +1,4 @@
-<<<<<<< HEAD
-.env
-=======
+
 HELP.md
 .gradle
 build/
@@ -35,7 +33,3 @@ out/
 /dist/
 /nbdist/
 /.nb-gradle/
-
-### VS Code ###
-.vscode/
->>>>>>> 389108973dc72417a3aed3fa935ea199e9a12454
