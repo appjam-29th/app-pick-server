@@ -1,12 +1,18 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict
 from dotenv import load_dotenv
+from pathlib import Path
+import json
+import httpx
+from bs4 import BeautifulSoup
+from pathlib import Path
 import os
 import openai
 import requests
 import re
 import json
+import httpx
 
 # .env 파일에서 환경 변수 로드
 load_dotenv()
@@ -77,14 +83,14 @@ async def get_app_recommendations_with_ai(user_request: UserRequest) -> List[Dic
     - 앱 추구 가치: {', '.join(user_request.values)}
     - 최애 앱: {user_request.favorite_app}
 
-    위 정보를 바탕으로 앱스토어의 앱을 5개 추천해주세요. JSON 형식으로 응답하세요.
+    위 정보를 바탕으로 한국 앱스토어의 앱을 5개 추천해주세요. JSON 형식으로 응답하세요.
     ```json
     [
-        {{"앱 이름": "앱1", "앱 URL": "앱1의 URL", "앱 아이콘 URL": "앱1의 아이콘 URL", "강점": "앱1의 강점"}},
-        {{"앱 이름": "앱2", "앱 URL": "앱2의 URL", "앱 아이콘 URL": "앱2의 아이콘 URL", "강점": "앱2의 강점"}},
-        {{"앱 이름": "앱3", "앱 URL": "앱3의 URL", "앱 아이콘 URL": "앱3의 아이콘 URL", "강점": "앱3의 강점"}},
-        {{"앱 이름": "앱4", "앱 URL": "앱4의 URL", "앱 아이콘 URL": "앱4의 아이콘 URL", "강점": "앱4의 강점"}},
-        {{"앱 이름": "앱5", "앱 URL": "앱5의 URL", "앱 아이콘 URL": "앱5의 아이콘 URL", "강점": "앱5의 강점"}}
+        {{"앱 이름": "앱1", "앱 URL": "앱1의 앱스토어 URL", "앱 아이콘 URL": "앱1의 아이콘 URL", "강점": "앱1의 강점"}},
+        {{"앱 이름": "앱2", "앱 URL": "앱2의 앱스토어 URL", "앱 아이콘 URL": "앱2의 아이콘 URL", "강점": "앱2의 강점"}},
+        {{"앱 이름": "앱3", "앱 URL": "앱3의 앱스토어 URL", "앱 아이콘 URL": "앱3의 아이콘 URL", "강점": "앱3의 강점"}},
+        {{"앱 이름": "앱4", "앱 URL": "앱4의 앱스토어 URL", "앱 아이콘 URL": "앱4의 아이콘 URL", "강점": "앱4의 강점"}},
+        {{"앱 이름": "앱5", "앱 URL": "앱5의 앱스토어 URL", "앱 아이콘 URL": "앱5의 아이콘 URL", "강점": "앱5의 강점"}}
     ]
     ```
     """
@@ -128,5 +134,60 @@ async def root():
 
 @app.post("/recommend_apps/")
 async def recommend_apps(request: UserRequest):
-    recommendations = await get_app_recommendations_with_ai(request)
-    return recommendations
+    return await get_app_recommendations_with_ai(request)
+
+DATA_FILE = Path("data.json")  # 로컬 data.json 파일 경로
+
+async def fetch_app_description(app_url: str):
+    """
+    Apple App Store에서 앱 설명을 가져오는 함수
+    - class="product-header__subtitle app-header__subtitle" 값을 가져옴
+    """
+    async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
+        try:
+            response = await client.get(app_url)
+            if response.status_code != 200:
+                return "설명 없음"  # 페이지를 가져오지 못하면 기본값 반환
+
+            soup = BeautifulSoup(response.text, "html.parser")
+            description_tag = soup.find("h2", class_="product-header__subtitle app-header__subtitle")
+
+            return description_tag.text.strip() if description_tag else "설명 없음"
+
+        except httpx.HTTPError:
+            return "설명 없음"  # 요청 실패 시 기본값 반환
+
+@app.get("/top_apps/")
+async def get_top_apps_local():
+    """
+    로컬 data.json 파일에서 한국 인기 무료 앱 10개를 가져와 웹 스크래핑으로 설명 추가
+    """
+    if not DATA_FILE.exists():
+        raise HTTPException(status_code=404, detail="Data file not found")
+
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        if "feed" not in data or "results" not in data["feed"]:
+            raise HTTPException(status_code=404, detail="No apps found in data file")
+
+        apps = []
+        for app in data["feed"]["results"]:
+            app_url = app.get("url", "")
+            genres = app.get("genres", [])  # 장르 정보 확인
+
+            # 기본적으로 genres[0] 사용, 없으면 웹 스크래핑 시도
+            app_description = genres[0] if genres else await fetch_app_description(app_url)
+
+            apps.append({
+                "app_id": app.get("id"),
+                "app_name": app.get("name"),
+                "app_image": app.get("artworkUrl100"),
+                "app_description": app_description
+            })
+
+        return apps
+
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Invalid JSON format in data file")
